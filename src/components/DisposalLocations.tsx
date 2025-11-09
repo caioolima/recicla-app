@@ -66,8 +66,15 @@ export default function DisposalLocations({ material, isOpen, onClose, userLocat
   };
 
   const openMaps = (location: DisposalLocation) => {
-    const url = `https://maps.google.com/maps?q=${location.coordinates.lat},${location.coordinates.lng}`;
-    window.open(url, '_blank');
+    if (userLocation) {
+      // Usar direções do Google Maps com origem (usuário) e destino (local)
+      const url = `https://www.google.com/maps/dir/?api=1&origin=${userLocation.lat},${userLocation.lng}&destination=${location.coordinates.lat},${location.coordinates.lng}&travelmode=driving`;
+      window.open(url, '_blank');
+    } else {
+      // Fallback: apenas mostrar o local se não tiver localização do usuário
+      const url = `https://www.google.com/maps/search/?api=1&query=${location.coordinates.lat},${location.coordinates.lng}`;
+      window.open(url, '_blank');
+    }
   };
 
   const callLocation = (phone: string) => {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Camera, Recycle, MapPin, Zap, ZapOff } from 'lucide-react';
+import { Camera, Recycle, MapPin, Zap, ZapOff, RefreshCw } from 'lucide-react';
 import DisposalLocations from '@/components/DisposalLocations';
 import * as tmImage from '@teachablemachine/image';
 
@@ -84,11 +84,14 @@ export default function Home() {
   const [model, setModel] = useState<tmImage.CustomMobileNet | null>(null);
   const [modelLoading, setModelLoading] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [locationLoading, setLocationLoading] = useState(true);
   const webcamRef = useRef<tmImage.Webcam | null>(null);
   const webcamContainerRef = useRef<HTMLDivElement>(null);
   const rafIdRef = useRef<number | null>(null);
   const [showCamera, setShowCamera] = useState(false);
   const [flashOn, setFlashOn] = useState(false);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
 
   // Carregar modelo e obter geolocalização ao montar o componente
   useEffect(() => {
@@ -96,27 +99,92 @@ export default function Home() {
     getUserLocation();
   }, []);
 
-  const getUserLocation = () => {
+  const getUserLocation = (onSuccess?: () => void, useHighAccuracy: boolean = true) => {
     if (!navigator.geolocation) {
       console.warn('Geolocalização não suportada pelo navegador');
+      setLocationError('Geolocalização não suportada pelo seu navegador');
+      setLocationLoading(false);
       return;
     }
 
+    setLocationLoading(true);
+    setLocationError(null);
+
+    const handleSuccess = (position: GeolocationPosition) => {
+      setUserLocation({
+        lat: position.coords.latitude,
+        lng: position.coords.longitude
+      });
+      setLocationLoading(false);
+      console.log('Localização obtida:', position.coords.latitude, position.coords.longitude);
+      if (onSuccess) {
+        onSuccess();
+      }
+    };
+
+    const handleError = (error: GeolocationPositionError) => {
+      // Log detalhado do erro
+      console.error('Erro ao obter localização:', {
+        code: error?.code,
+        message: error?.message,
+        toString: error?.toString?.()
+      });
+      
+      setLocationLoading(false);
+      let errorMessage = 'Não foi possível obter sua localização';
+      
+      try {
+        // Verificar se o erro tem a propriedade code
+        if (error && typeof error === 'object') {
+          const errorCode = error.code;
+          
+          if (typeof errorCode === 'number') {
+            switch(errorCode) {
+              case 1: // PERMISSION_DENIED
+                errorMessage = 'Permissão de localização negada. Por favor, permita o acesso à localização nas configurações do navegador.';
+                setLocationError(errorMessage);
+                return; // Não tentar fallback para permissão negada
+              case 2: // POSITION_UNAVAILABLE
+                // Se estava usando high accuracy, tentar sem
+                if (useHighAccuracy) {
+                  console.log('Tentando obter localização sem high accuracy...');
+                  getUserLocation(onSuccess, false);
+                  return;
+                }
+                errorMessage = 'Localização indisponível. Verifique se o GPS está ativado ou tente novamente.';
+                break;
+              case 3: // TIMEOUT
+                // Se estava usando high accuracy, tentar sem
+                if (useHighAccuracy) {
+                  console.log('Timeout com high accuracy, tentando sem...');
+                  getUserLocation(onSuccess, false);
+                  return;
+                }
+                errorMessage = 'Tempo esgotado ao obter localização. Tente novamente.';
+                break;
+              default:
+                errorMessage = error.message || 'Não foi possível obter sua localização. Verifique as permissões do navegador.';
+            }
+          } else if (error.message) {
+            errorMessage = error.message;
+          }
+        }
+      } catch (e) {
+        // Se houver algum erro ao processar o erro, usar mensagem genérica
+        console.error('Erro ao processar erro de geolocalização:', e);
+        errorMessage = 'Não foi possível obter sua localização. Verifique as permissões do navegador e tente novamente.';
+      }
+      
+      setLocationError(errorMessage);
+    };
+
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setUserLocation({
-          lat: position.coords.latitude,
-          lng: position.coords.longitude
-        });
-        console.log('Localização obtida:', position.coords.latitude, position.coords.longitude);
-      },
-      (error) => {
-        console.error('Erro ao obter localização:', error);
-      },
+      handleSuccess,
+      handleError,
       {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0
+        enableHighAccuracy: useHighAccuracy,
+        timeout: useHighAccuracy ? 15000 : 10000,
+        maximumAge: 0 // Sempre obter localização atual, não usar cache
       }
     );
   };
@@ -137,24 +205,84 @@ export default function Home() {
     }
   };
 
-  const startCamera = async () => {
+  const startCamera = async (cameraFacingMode: 'user' | 'environment' = facingMode) => {
     if (!model) {
       alert('Modelo ainda não carregado. Aguarde um momento e tente novamente.');
       return;
     }
 
     try {
-      console.log('Iniciando câmera...');
+      console.log('Iniciando câmera...', cameraFacingMode);
       setCameraLoading(true);
       setShowCamera(true);
       
-      // Usar tmImage.Webcam como no código HTML
-      const flip = true;
+      // Parar câmera anterior se existir
+      if (webcamRef.current) {
+        try {
+          webcamRef.current.stop();
+          // Parar todos os tracks do stream se existir
+          // O tmImage.Webcam pode ter um elemento video interno
+          if ((webcamRef.current as any).webcam) {
+            const videoElement = (webcamRef.current as any).webcam;
+            if (videoElement && videoElement.srcObject) {
+              const stream = videoElement.srcObject as MediaStream;
+              stream.getTracks().forEach(track => {
+                track.stop();
+              });
+            }
+          }
+        } catch (e) {
+          console.error('Erro ao parar câmera anterior:', e);
+        }
+        webcamRef.current = null;
+      }
+
+      // Cancelar loop anterior se existir
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+      
+      // Limpar container
+      if (webcamContainerRef.current) {
+        webcamContainerRef.current.innerHTML = '';
+      }
+      
+      // Aguardar um pouco para garantir que a câmera anterior foi liberada
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      // Criar novo webcam com flip baseado na câmera
+      const flip = cameraFacingMode === 'user'; // Flip apenas para câmera frontal
       const webcam = new tmImage.Webcam(320, 240, flip);
-      await webcam.setup(); // pede permissão
-      await webcam.play();
+      
+      // Interceptar getUserMedia para passar as constraints da câmera correta
+      // Isso permite que o tmImage.Webcam use a câmera que queremos
+      const originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+      
+      navigator.mediaDevices.getUserMedia = async (requestedConstraints: MediaStreamConstraints) => {
+        // Sempre usar a câmera que escolhemos (facingMode)
+        const customConstraints: MediaStreamConstraints = {
+          video: {
+            facingMode: cameraFacingMode,
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: requestedConstraints.audio || false
+        };
+        
+        return originalGetUserMedia(customConstraints);
+      };
+      
+      try {
+        await webcam.setup();
+        await webcam.play();
+      } finally {
+        // Restaurar getUserMedia original
+        navigator.mediaDevices.getUserMedia = originalGetUserMedia;
+      }
       
       webcamRef.current = webcam;
+      setFacingMode(cameraFacingMode);
       
       // Adicionar o canvas do webcam ao container
       if (webcamContainerRef.current) {
@@ -188,6 +316,17 @@ export default function Home() {
     if (webcamRef.current) {
       try {
         webcamRef.current.stop();
+        // Parar todos os tracks do stream se existir
+        // O tmImage.Webcam pode ter um elemento video interno
+        if ((webcamRef.current as any).webcam) {
+          const videoElement = (webcamRef.current as any).webcam;
+          if (videoElement && videoElement.srcObject) {
+            const stream = videoElement.srcObject as MediaStream;
+            stream.getTracks().forEach(track => {
+              track.stop();
+            });
+          }
+        }
       } catch (e) {
         console.error('Erro ao parar webcam:', e);
       }
@@ -208,6 +347,11 @@ export default function Home() {
     // O tmImage.Webcam não expõe diretamente o stream, então precisamos acessar via canvas
     // Por enquanto, vamos desabilitar o flash já que não temos acesso direto ao stream
     alert('Controle de flash não disponível com esta implementação');
+  };
+
+  const switchCamera = async () => {
+    const newFacingMode = facingMode === 'user' ? 'environment' : 'user';
+    await startCamera(newFacingMode);
   };
 
   // Loop de predição em tempo real - seguindo exatamente a lógica do HTML
@@ -418,14 +562,37 @@ export default function Home() {
               </div>
               
               <div className="space-y-3">
-                {userLocation && (
-                  <button
-                    onClick={() => setShowDisposalLocations(true)}
-                    className="px-6 py-3 bg-gradient-to-r from-gray-800 to-gray-700 text-white rounded-xl flex items-center justify-center space-x-2 hover:opacity-80 transition-all duration-200 shadow-md hover:shadow-lg font-medium cursor-pointer w-full"
-                  >
-                    <MapPin className="h-5 w-5" />
-                    <span>Encontrar Pontos de Descarte</span>
-                  </button>
+                <button
+                  onClick={() => {
+                    if (userLocation) {
+                      setShowDisposalLocations(true);
+                    } else {
+                      getUserLocation(() => {
+                        setShowDisposalLocations(true);
+                      });
+                    }
+                  }}
+                  disabled={locationLoading}
+                  className="px-6 py-3 bg-gradient-to-r from-gray-800 to-gray-700 text-white rounded-xl flex items-center justify-center space-x-2 hover:opacity-80 transition-all duration-200 shadow-md hover:shadow-lg font-medium cursor-pointer w-full disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <MapPin className="h-5 w-5" />
+                  <span>
+                    {locationLoading ? 'Obtendo localização...' : 'Encontrar Pontos de Descarte Próximos'}
+                  </span>
+                </button>
+                
+                {!userLocation && locationError && (
+                  <div className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-xl">
+                    <p className="text-yellow-300 text-xs">
+                      ⚠️ {locationError}
+                    </p>
+                    <button
+                      onClick={() => getUserLocation()}
+                      className="mt-2 text-yellow-300 text-xs underline hover:text-yellow-200"
+                    >
+                      Tentar novamente
+                    </button>
+                  </div>
                 )}
                 
                 <button
@@ -484,8 +651,17 @@ export default function Home() {
                     </div>
                   </div>
                   
-                  {/* Flash Button and Close Button */}
+                  {/* Camera Controls: Switch, Flash, and Close Button */}
                   <div className="flex items-center gap-2 md:gap-3 self-end md:self-auto">
+                    <button
+                      onClick={switchCamera}
+                      disabled={cameraLoading}
+                      className="p-3 md:p-4 rounded-2xl shadow-modern transition-all duration-200 cursor-pointer glass-card text-white border border-white/20 hover:bg-white/10 flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                      title={facingMode === 'user' ? 'Trocar para câmera traseira' : 'Trocar para câmera frontal'}
+                    >
+                      <RefreshCw className="h-5 w-5 md:h-6 md:w-6" />
+                    </button>
+                    
                     <button
                       onClick={toggleFlash}
                       className={`p-3 md:p-4 rounded-2xl shadow-modern transition-all duration-200 cursor-pointer flex-shrink-0 ${
