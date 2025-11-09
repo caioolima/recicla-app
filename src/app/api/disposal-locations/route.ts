@@ -16,6 +16,40 @@ interface PlaceResult {
   types?: string[];
 }
 
+interface GooglePlace {
+  place_id: string;
+  name: string;
+  formatted_address?: string;
+  vicinity?: string;
+  geometry: {
+    location: {
+      lat: number;
+      lng: number;
+    };
+  };
+  rating?: number;
+  types?: string[];
+}
+
+interface OSMElement {
+  id: number;
+  lat?: number;
+  lon?: number;
+  center?: {
+    lat: number;
+    lon: number;
+  };
+  tags?: {
+    name?: string;
+    'addr:street'?: string;
+    'addr:housenumber'?: string;
+    'addr:city'?: string;
+    phone?: string;
+    website?: string;
+    'opening_hours'?: string;
+  };
+}
+
 // Função para calcular distância em km entre duas coordenadas
 function calculateDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371; // Raio da Terra em km
@@ -62,7 +96,7 @@ export async function GET(request: NextRequest) {
         
         if (data.results && data.results.length > 0) {
           places = await Promise.all(
-            data.results.slice(0, 10).map(async (place: any) => {
+            data.results.slice(0, 10).map(async (place: GooglePlace) => {
               const distance = calculateDistance(
                 userLat,
                 userLng,
@@ -136,7 +170,7 @@ export async function GET(request: NextRequest) {
         if (data.elements && data.elements.length > 0) {
           // Processar elementos e buscar nomes usando reverse geocoding quando necessário
           places = await Promise.all(
-            data.elements.slice(0, 10).map(async (element: any) => {
+            data.elements.slice(0, 10).map(async (element: OSMElement) => {
               const elementLat = element.lat || (element.center?.lat);
               const elementLng = element.lon || (element.center?.lon);
               

@@ -65,9 +65,11 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function simulateVisionAPI(imageData: string): Promise<string[]> {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function simulateVisionAPI(_imageData: string): Promise<string[]> {
   // Simulação da resposta do Google Vision API
   // Em produção, aqui você faria a chamada real para a API
+  // _imageData está prefixado com _ para indicar que não é usado nesta função simulada
   
   const possibleObjects = Object.keys(recyclingDatabase);
   const numObjects = Math.floor(Math.random() * 3) + 1; // 1-3 objetos

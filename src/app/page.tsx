@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Camera, Upload, Recycle, MapPin, Info, Zap, ZapOff } from 'lucide-react';
+import { Camera, Upload, Recycle, MapPin, Zap, ZapOff } from 'lucide-react';
 import Image from 'next/image';
 import DisposalLocations from '@/components/DisposalLocations';
 import * as tmImage from '@teachablemachine/image';
@@ -86,7 +86,6 @@ export default function Home() {
   const [model, setModel] = useState<tmImage.CustomMobileNet | null>(null);
   const [modelLoading, setModelLoading] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [locationError, setLocationError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -102,7 +101,7 @@ export default function Home() {
 
   const getUserLocation = () => {
     if (!navigator.geolocation) {
-      setLocationError('Geolocalização não suportada pelo navegador');
+      console.warn('Geolocalização não suportada pelo navegador');
       return;
     }
 
@@ -116,7 +115,6 @@ export default function Home() {
       },
       (error) => {
         console.error('Erro ao obter localização:', error);
-        setLocationError('Não foi possível obter sua localização. Permita o acesso à localização.');
       },
       {
         enableHighAccuracy: true,
@@ -160,8 +158,8 @@ export default function Home() {
       let stream;
       try {
         stream = await navigator.mediaDevices.getUserMedia(constraints);
-      } catch (error) {
-        console.log('Câmera traseira não disponível, tentando câmera frontal...');
+      } catch (err) {
+        console.log('Câmera traseira não disponível, tentando câmera frontal...', err);
         // Se falhar, tenta câmera frontal (desktop)
         constraints = { 
           video: { 
