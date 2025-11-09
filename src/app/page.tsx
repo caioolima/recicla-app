@@ -89,6 +89,7 @@ export default function Home() {
   const webcamRef = useRef<tmImage.Webcam | null>(null);
   const webcamContainerRef = useRef<HTMLDivElement>(null);
   const rafIdRef = useRef<number | null>(null);
+  const videoTrackRef = useRef<MediaStreamTrack | null>(null);
   const [showCamera, setShowCamera] = useState(false);
   const [flashOn, setFlashOn] = useState(false);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
@@ -227,6 +228,18 @@ export default function Home() {
       if (webcamRef.current) {
         try {
           webcamRef.current.stop();
+          // Desligar flash antes de parar
+          if (flashOn && videoTrackRef.current) {
+            try {
+              const track = videoTrackRef.current;
+              await track.applyConstraints({
+                advanced: [{ torch: false } as MediaTrackConstraints]
+              });
+            } catch (e) {
+              console.error('Erro ao desligar flash:', e);
+            }
+          }
+
           // Parar todos os tracks do stream se existir
           // O tmImage.Webcam pode ter um elemento video interno
           const webcamInternal = webcamRef.current as tmImage.Webcam & {
@@ -247,6 +260,7 @@ export default function Home() {
           console.error('Erro ao parar câmera anterior:', e);
         }
         webcamRef.current = null;
+        videoTrackRef.current = null;
       }
 
       // Cancelar loop anterior se existir
@@ -263,26 +277,38 @@ export default function Home() {
       // Aguardar um pouco para garantir que a câmera anterior foi liberada
       await new Promise(resolve => setTimeout(resolve, 200));
       
-      // Criar novo webcam com flip baseado na câmera
+      // Criar novo webcam com resolução 720p (1280x720)
       const flip = cameraFacingMode === 'user'; // Flip apenas para câmera frontal
-      const webcam = new tmImage.Webcam(320, 240, flip);
+      const webcam = new tmImage.Webcam(1280, 720, flip);
       
       // Interceptar getUserMedia para passar as constraints da câmera correta
       // Isso permite que o tmImage.Webcam use a câmera que queremos
       const originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
       
+      let capturedStream: MediaStream | null = null;
+      
       navigator.mediaDevices.getUserMedia = async (requestedConstraints: MediaStreamConstraints) => {
-        // Sempre usar a câmera que escolhemos (facingMode)
+        // Sempre usar a câmera que escolhemos (facingMode) com alta qualidade
         const customConstraints: MediaStreamConstraints = {
           video: {
             facingMode: cameraFacingMode,
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
+            width: { ideal: 1280, min: 1280 },
+            height: { ideal: 720, min: 720 },
+            aspectRatio: { ideal: 16/9 }
           },
           audio: requestedConstraints.audio || false
         };
         
-        return originalGetUserMedia(customConstraints);
+        const stream = await originalGetUserMedia(customConstraints);
+        capturedStream = stream;
+        
+        // Capturar o track de vídeo para controle de flash
+        const videoTrack = stream.getVideoTracks()[0];
+        if (videoTrack) {
+          videoTrackRef.current = videoTrack;
+        }
+        
+        return stream;
       };
       
       try {
@@ -305,6 +331,27 @@ export default function Home() {
         webcamContainerRef.current.appendChild(webcam.canvas);
       }
       
+      // Se havia flash ligado antes, aplicar novamente após um pequeno delay
+      // para garantir que a câmera está totalmente inicializada
+      if (flashOn && cameraFacingMode === 'environment') {
+        setTimeout(async () => {
+          const videoTrack = videoTrackRef.current;
+          if (videoTrack) {
+            try {
+              const capabilities = videoTrack.getCapabilities();
+              if (capabilities && 'torch' in capabilities) {
+                await videoTrack.applyConstraints({
+                  advanced: [{ torch: true } as MediaTrackConstraints]
+                });
+                setFlashOn(true);
+              }
+            } catch (error) {
+              console.error('Erro ao ligar flash:', error);
+            }
+          }
+        }, 500);
+      }
+      
       setCameraLoading(false);
       
       // Iniciar o loop de predição
@@ -318,13 +365,25 @@ export default function Home() {
     }
   };
 
-  const stopCamera = () => {
+  const stopCamera = async () => {
     // Cancelar o loop de predição
     if (rafIdRef.current !== null) {
       cancelAnimationFrame(rafIdRef.current);
       rafIdRef.current = null;
     }
     
+    // Desligar flash antes de parar a câmera
+    if (flashOn && videoTrackRef.current) {
+      try {
+        const track = videoTrackRef.current;
+        await track.applyConstraints({
+          advanced: [{ torch: false } as MediaTrackConstraints]
+        });
+      } catch (e) {
+        console.error('Erro ao desligar flash:', e);
+      }
+    }
+
     if (webcamRef.current) {
       try {
         webcamRef.current.stop();
@@ -349,6 +408,11 @@ export default function Home() {
       }
       webcamRef.current = null;
     }
+
+    // Limpar referência do track
+    if (videoTrackRef.current) {
+      videoTrackRef.current = null;
+    }
     
     if (webcamContainerRef.current) {
       webcamContainerRef.current.innerHTML = '';
@@ -360,10 +424,64 @@ export default function Home() {
     setResult(null);
   };
 
+  const toggleFlashInternal = async (forceState?: boolean): Promise<boolean> => {
+    const videoTrack = videoTrackRef.current;
+    
+    if (!videoTrack) {
+      console.warn('Track de vídeo não disponível para controlar flash');
+      return false;
+    }
+
+    // Flash só funciona na câmera traseira (environment)
+    if (facingMode !== 'environment') {
+      console.warn('Flash só está disponível na câmera traseira');
+      return false;
+    }
+
+    try {
+      const newState = forceState !== undefined ? forceState : !flashOn;
+      const capabilities = videoTrack.getCapabilities();
+      
+      // Verificar se o dispositivo suporta torch (flash)
+      if (capabilities && 'torch' in capabilities) {
+        await videoTrack.applyConstraints({
+          advanced: [{ torch: newState } as MediaTrackConstraints]
+        });
+        setFlashOn(newState);
+        return true;
+      } else {
+        console.warn('Dispositivo não suporta controle de flash/torch');
+        return false;
+      }
+    } catch (error) {
+      console.error('Erro ao alternar flash:', error);
+      // Se falhar, tentar método alternativo
+      try {
+        const newState = forceState !== undefined ? forceState : !flashOn;
+        const settings = videoTrack.getSettings();
+        await videoTrack.applyConstraints({
+          ...settings,
+          torch: newState
+        } as MediaTrackConstraints);
+        setFlashOn(newState);
+        return true;
+      } catch (altError) {
+        console.error('Erro ao alternar flash (método alternativo):', altError);
+        return false;
+      }
+    }
+  };
+
   const toggleFlash = async () => {
-    // O tmImage.Webcam não expõe diretamente o stream, então precisamos acessar via canvas
-    // Por enquanto, vamos desabilitar o flash já que não temos acesso direto ao stream
-    alert('Controle de flash não disponível com esta implementação');
+    if (facingMode !== 'environment') {
+      alert('Flash só está disponível na câmera traseira. Troque para a câmera traseira primeiro.');
+      return;
+    }
+
+    const success = await toggleFlashInternal();
+    if (!success) {
+      alert('Seu dispositivo pode não suportar controle de flash ou a câmera não está pronta. Tente novamente em alguns segundos.');
+    }
   };
 
   const switchCamera = async () => {
