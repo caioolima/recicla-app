@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Camera, Recycle, MapPin, Zap, ZapOff, RefreshCw } from 'lucide-react';
 import DisposalLocations from '@/components/DisposalLocations';
 import * as tmImage from '@teachablemachine/image';
@@ -93,13 +93,9 @@ export default function Home() {
   const [flashOn, setFlashOn] = useState(false);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
 
-  // Carregar modelo e obter geolocalização ao montar o componente
-  useEffect(() => {
-    loadModel();
-    getUserLocation();
-  }, []);
+  const getUserLocationRef = useRef<((onSuccess?: () => void, useHighAccuracy?: boolean) => void) | null>(null);
 
-  const getUserLocation = (onSuccess?: () => void, useHighAccuracy: boolean = true) => {
+  const getUserLocation = useCallback((onSuccess?: () => void, useHighAccuracy: boolean = true) => {
     if (!navigator.geolocation) {
       console.warn('Geolocalização não suportada pelo navegador');
       setLocationError('Geolocalização não suportada pelo seu navegador');
@@ -146,18 +142,18 @@ export default function Home() {
                 return; // Não tentar fallback para permissão negada
               case 2: // POSITION_UNAVAILABLE
                 // Se estava usando high accuracy, tentar sem
-                if (useHighAccuracy) {
+                if (useHighAccuracy && getUserLocationRef.current) {
                   console.log('Tentando obter localização sem high accuracy...');
-                  getUserLocation(onSuccess, false);
+                  getUserLocationRef.current(onSuccess, false);
                   return;
                 }
                 errorMessage = 'Localização indisponível. Verifique se o GPS está ativado ou tente novamente.';
                 break;
               case 3: // TIMEOUT
                 // Se estava usando high accuracy, tentar sem
-                if (useHighAccuracy) {
+                if (useHighAccuracy && getUserLocationRef.current) {
                   console.log('Timeout com high accuracy, tentando sem...');
-                  getUserLocation(onSuccess, false);
+                  getUserLocationRef.current(onSuccess, false);
                   return;
                 }
                 errorMessage = 'Tempo esgotado ao obter localização. Tente novamente.';
@@ -187,7 +183,12 @@ export default function Home() {
         maximumAge: 0 // Sempre obter localização atual, não usar cache
       }
     );
-  };
+  }, []);
+
+  // Atualizar ref quando a função mudar
+  useEffect(() => {
+    getUserLocationRef.current = getUserLocation;
+  }, [getUserLocation]);
 
   const loadModel = async () => {
     try {
@@ -204,6 +205,12 @@ export default function Home() {
       setModelLoading(false);
     }
   };
+
+  // Carregar modelo e obter geolocalização ao montar o componente
+  useEffect(() => {
+    loadModel();
+    getUserLocation();
+  }, [getUserLocation]);
 
   const startCamera = async (cameraFacingMode: 'user' | 'environment' = facingMode) => {
     if (!model) {
@@ -222,8 +229,13 @@ export default function Home() {
           webcamRef.current.stop();
           // Parar todos os tracks do stream se existir
           // O tmImage.Webcam pode ter um elemento video interno
-          if ((webcamRef.current as any).webcam) {
-            const videoElement = (webcamRef.current as any).webcam;
+          const webcamInternal = webcamRef.current as tmImage.Webcam & {
+            webcam?: HTMLVideoElement & {
+              srcObject?: MediaStream | null;
+            };
+          };
+          if (webcamInternal.webcam) {
+            const videoElement = webcamInternal.webcam;
             if (videoElement && videoElement.srcObject) {
               const stream = videoElement.srcObject as MediaStream;
               stream.getTracks().forEach(track => {
@@ -318,8 +330,13 @@ export default function Home() {
         webcamRef.current.stop();
         // Parar todos os tracks do stream se existir
         // O tmImage.Webcam pode ter um elemento video interno
-        if ((webcamRef.current as any).webcam) {
-          const videoElement = (webcamRef.current as any).webcam;
+        const webcamInternal = webcamRef.current as tmImage.Webcam & {
+          webcam?: HTMLVideoElement & {
+            srcObject?: MediaStream | null;
+          };
+        };
+        if (webcamInternal.webcam) {
+          const videoElement = webcamInternal.webcam;
           if (videoElement && videoElement.srcObject) {
             const stream = videoElement.srcObject as MediaStream;
             stream.getTracks().forEach(track => {
@@ -514,7 +531,7 @@ export default function Home() {
               
               <div className="flex flex-col sm:flex-row gap-4 justify-center">
                 <button
-                  onClick={startCamera}
+                  onClick={() => startCamera()}
                   className="px-10 py-5 bg-gradient-to-r from-gray-800 to-gray-700 text-white rounded-xl flex items-center justify-center space-x-4 hover:opacity-80 transition-all duration-200 shadow-md hover:shadow-lg font-medium cursor-pointer text-lg"
                 >
                   <Camera className="h-6 w-6" />
