@@ -532,25 +532,25 @@ export default function Home() {
               )}
               
               {/* Camera Instructions Overlay */}
-              <div className="absolute top-6 left-6 right-6">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="glass-card p-4 rounded-2xl shadow-modern max-w-md">
-                    <div className="flex items-center space-x-4">
-                      <div className="p-3 bg-gradient-to-r from-gray-800 to-gray-700 rounded-xl">
-                        <Camera className="h-6 w-6 text-white" />
+              <div className="absolute top-3 md:top-6 left-3 md:left-6 right-3 md:right-6">
+                <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 md:gap-4">
+                  <div className="glass-card p-3 md:p-4 rounded-2xl shadow-modern max-w-md w-full md:w-auto">
+                    <div className="flex items-center space-x-2 md:space-x-4">
+                      <div className="p-2 md:p-3 bg-gradient-to-r from-gray-800 to-gray-700 rounded-xl flex-shrink-0">
+                        <Camera className="h-5 w-5 md:h-6 md:w-6 text-white" />
                       </div>
-                      <div>
-                        <h3 className="text-lg font-bold text-white">Reconhecimento em Tempo Real</h3>
-                        <p className="text-white text-sm">Posicione o material na frente da câmera</p>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-base md:text-lg font-bold text-white">Reconhecimento em Tempo Real</h3>
+                        <p className="text-white text-xs md:text-sm">Posicione o material na frente da câmera</p>
                       </div>
                     </div>
                   </div>
                   
                   {/* Flash Button and Close Button */}
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 md:gap-3 self-end md:self-auto">
                     <button
                       onClick={toggleFlash}
-                      className={`p-4 rounded-2xl shadow-modern transition-all duration-200 cursor-pointer ${
+                      className={`p-3 md:p-4 rounded-2xl shadow-modern transition-all duration-200 cursor-pointer flex-shrink-0 ${
                         flashOn 
                           ? 'bg-white text-black' 
                           : 'glass-card text-white border border-white/20'
@@ -558,18 +558,18 @@ export default function Home() {
                       title={flashOn ? 'Desligar flash' : 'Ligar flash'}
                     >
                       {flashOn ? (
-                        <Zap className="h-6 w-6" />
+                        <Zap className="h-5 w-5 md:h-6 md:w-6" />
                       ) : (
-                        <ZapOff className="h-6 w-6" />
+                        <ZapOff className="h-5 w-5 md:h-6 md:w-6" />
                       )}
                     </button>
                     
                     <button
                       onClick={stopCamera}
-                      className="p-4 rounded-2xl shadow-modern transition-all duration-200 cursor-pointer glass-card text-white border border-white/20 hover:bg-white/10"
+                      className="p-3 md:p-4 rounded-2xl shadow-modern transition-all duration-200 cursor-pointer glass-card text-white border border-white/20 hover:bg-white/10 flex-shrink-0"
                       title="Fechar câmera"
                     >
-                      <span className="text-2xl font-bold">×</span>
+                      <span className="text-xl md:text-2xl font-bold">×</span>
                     </button>
                   </div>
                 </div>
@@ -577,18 +577,18 @@ export default function Home() {
 
               {/* Resultado em tempo real na câmera */}
               {result && (
-                <div className="absolute bottom-40 md:bottom-36 left-1/2 transform -translate-x-1/2 z-10 w-auto max-w-md">
-                  <div className={`glass-card p-4 rounded-2xl shadow-modern border ${
+                <div className="absolute bottom-24 md:bottom-36 left-3 md:left-1/2 right-3 md:right-auto md:transform md:-translate-x-1/2 z-10 w-auto max-w-md md:mx-auto">
+                  <div className={`glass-card p-3 md:p-4 rounded-2xl shadow-modern border ${
                     result.isRecyclable 
                       ? 'border-gray-400/30' 
                       : 'border-gray-500/30'
                   }`}>
-                    <div className="flex items-center space-x-3 mb-2">
-                      <div className={`w-3 h-3 rounded-full ${
+                    <div className="flex items-center space-x-2 md:space-x-3 mb-2">
+                      <div className={`w-2.5 h-2.5 md:w-3 md:h-3 rounded-full flex-shrink-0 ${
                         result.isRecyclable ? 'bg-white' : 'bg-gray-400'
                       }`}></div>
-                      <h3 className="text-base md:text-lg font-bold text-white">{result.category}</h3>
-                      <div className={`ml-auto glass-card px-2 py-1 rounded-full ${
+                      <h3 className="text-sm md:text-lg font-bold text-white truncate flex-1 min-w-0">{result.category}</h3>
+                      <div className={`ml-auto glass-card px-2 py-1 rounded-full flex-shrink-0 ${
                         result.confidence < 50 ? 'bg-red-500/20 border border-red-500/30' : ''
                       }`}>
                         <span className={`text-xs font-medium ${
@@ -598,7 +598,7 @@ export default function Home() {
                         </span>
                       </div>
                     </div>
-                    <p className="text-white text-sm md:text-base font-semibold">{result.material}</p>
+                    <p className="text-white text-xs md:text-base font-semibold break-words">{result.material}</p>
                   </div>
                 </div>
               )}
