@@ -17,6 +17,7 @@ interface AnalysisResult {
 const MODEL_URL = "https://teachablemachine.withgoogle.com/models/7s87fVPZw/";
 
 // Mapeamento das classes do modelo para informações de reciclagem
+// Baseado nas labels do modelo: ["Esponja","Pilha/bateria","Papelão","Garrafa pet","Defaut","Vidro ","Palha de aço","Pneu/borracha"]
 const recyclingDatabase: Record<string, AnalysisResult> = {
   'Garrafa pet': {
     isRecyclable: true,
@@ -32,28 +33,28 @@ const recyclingDatabase: Record<string, AnalysisResult> = {
     disposalInfo: 'Pneus devem ser descartados em pontos específicos de coleta. Não descarte no lixo comum. Procure borracharias ou pontos de coleta de pneus.',
     confidence: 0
   },
-  'Objetos de vidro (pratos)': {
+  'Vidro ': {
     isRecyclable: true,
     material: 'Vidro',
     category: 'Reciclável',
     disposalInfo: 'Lave e remova tampas. Vidro é 100% reciclável e pode ser reutilizado infinitamente. Cuidado com cacos.',
     confidence: 0
   },
-  'Caixa de papelão': {
+  'Papelão': {
     isRecyclable: true,
     material: 'Papelão',
     category: 'Reciclável',
     disposalInfo: 'Desmonte caixas de papelão e mantenha seco. Pode ser reciclado mesmo com fitas adesivas.',
     confidence: 0
   },
-  'Esponja de lavar louça': {
+  'Esponja': {
     isRecyclable: false,
-    material: 'Esponja de Lavar Louça',
+    material: 'Esponja',
     category: 'Não Reciclável',
     disposalInfo: 'Esponjas não são recicláveis. Descarte no lixo comum. Considere usar esponjas reutilizáveis ou biodegradáveis.',
     confidence: 0
   },
-  'Pilhas/baterias': {
+  'Pilha/bateria': {
     isRecyclable: false,
     material: 'Pilhas/Baterias',
     category: 'Resíduo Perigoso',
@@ -67,7 +68,7 @@ const recyclingDatabase: Record<string, AnalysisResult> = {
     disposalInfo: 'Palha de aço não é reciclável. Descarte no lixo comum. Considere alternativas reutilizáveis.',
     confidence: 0
   },
-  'Default (vazio)': {
+  'Defaut': {
     isRecyclable: false,
     material: 'Material não identificado',
     category: 'Não Identificado',
@@ -83,9 +84,8 @@ export default function Home() {
   const [model, setModel] = useState<tmImage.CustomMobileNet | null>(null);
   const [modelLoading, setModelLoading] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  const webcamRef = useRef<tmImage.Webcam | null>(null);
+  const webcamContainerRef = useRef<HTMLDivElement>(null);
   const rafIdRef = useRef<number | null>(null);
   const [showCamera, setShowCamera] = useState(false);
   const [flashOn, setFlashOn] = useState(false);
@@ -138,67 +138,37 @@ export default function Home() {
   };
 
   const startCamera = async () => {
+    if (!model) {
+      alert('Modelo ainda não carregado. Aguarde um momento e tente novamente.');
+      return;
+    }
+
     try {
       console.log('Iniciando câmera...');
       setCameraLoading(true);
-      setShowCamera(true); // Mostra a interface da câmera primeiro
+      setShowCamera(true);
       
-      // Primeiro tenta com câmera traseira (mobile)
-      let constraints = { 
-        video: { 
-          facingMode: 'environment',
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        } 
-      };
+      // Usar tmImage.Webcam como no código HTML
+      const flip = true;
+      const webcam = new tmImage.Webcam(320, 240, flip);
+      await webcam.setup(); // pede permissão
+      await webcam.play();
       
-      let stream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
-      } catch (err) {
-        console.log('Câmera traseira não disponível, tentando câmera frontal...', err);
-        // Se falhar, tenta câmera frontal (desktop)
-        constraints = { 
-          video: { 
-            facingMode: 'user',
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          } 
-        };
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      webcamRef.current = webcam;
+      
+      // Adicionar o canvas do webcam ao container
+      if (webcamContainerRef.current) {
+        webcamContainerRef.current.innerHTML = '';
+        webcam.canvas.style.width = '100%';
+        webcam.canvas.style.height = '100%';
+        webcam.canvas.style.objectFit = 'cover';
+        webcamContainerRef.current.appendChild(webcam.canvas);
       }
       
-      console.log('Stream obtido:', stream);
-      streamRef.current = stream; // Salvar o stream para controlar o flash
+      setCameraLoading(false);
       
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        
-        // Aguardar o video carregar e iniciar o loop de predição
-        videoRef.current.onloadedmetadata = () => {
-          console.log('Metadata carregada, iniciando reprodução...');
-          setCameraLoading(false);
-          videoRef.current?.play().catch(e => console.error('Erro ao reproduzir:', e));
-          
-          // Iniciar o loop de predição em tempo real quando o modelo estiver pronto
-          if (model) {
-            runLoop();
-          }
-        };
-        
-        // Fallback caso onloadedmetadata não funcione
-        setTimeout(() => {
-          if (videoRef.current) {
-            setCameraLoading(false);
-            videoRef.current.play().catch(e => console.error('Erro no fallback:', e));
-            
-            // Iniciar o loop de predição em tempo real quando o modelo estiver pronto
-            if (model) {
-              runLoop();
-            }
-          }
-        }, 1000);
-      }
+      // Iniciar o loop de predição
+      runLoop();
     } catch (error) {
       console.error('Erro ao acessar câmera:', error);
       setShowCamera(false);
@@ -215,14 +185,19 @@ export default function Home() {
       rafIdRef.current = null;
     }
     
-    if (videoRef.current?.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach(track => track.stop());
+    if (webcamRef.current) {
+      try {
+        webcamRef.current.stop();
+      } catch (e) {
+        console.error('Erro ao parar webcam:', e);
+      }
+      webcamRef.current = null;
     }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
+    
+    if (webcamContainerRef.current) {
+      webcamContainerRef.current.innerHTML = '';
     }
+    
     setShowCamera(false);
     setCameraLoading(false);
     setFlashOn(false);
@@ -230,105 +205,68 @@ export default function Home() {
   };
 
   const toggleFlash = async () => {
-    if (!streamRef.current) return;
-
-    const videoTrack = streamRef.current.getVideoTracks()[0];
-    if (!videoTrack) return;
-
-    const capabilities = videoTrack.getCapabilities() as MediaTrackCapabilities & { torch?: boolean };
-    if (!capabilities.torch) {
-      alert('Flash não disponível neste dispositivo');
-      return;
-    }
-
-    try {
-      await videoTrack.applyConstraints({
-        advanced: [{ torch: !flashOn } as MediaTrackConstraints]
-      });
-      setFlashOn(!flashOn);
-    } catch (error) {
-      console.error('Erro ao controlar flash:', error);
-      alert('Não foi possível controlar o flash');
-    }
+    // O tmImage.Webcam não expõe diretamente o stream, então precisamos acessar via canvas
+    // Por enquanto, vamos desabilitar o flash já que não temos acesso direto ao stream
+    alert('Controle de flash não disponível com esta implementação');
   };
 
-  // Loop de predição em tempo real
+  // Loop de predição em tempo real - seguindo exatamente a lógica do HTML
   const runLoop = async () => {
-    if (!videoRef.current || !model || !canvasRef.current) {
-      rafIdRef.current = requestAnimationFrame(runLoop);
+    if (!webcamRef.current) {
       return;
     }
 
-    const canvas = canvasRef.current;
-    const video = videoRef.current;
-    
-    // Verificar se o vídeo está pronto
-    if (video.videoWidth === 0 || video.videoHeight === 0) {
-      rafIdRef.current = requestAnimationFrame(runLoop);
-      return;
-    }
-
-    // Configurar canvas apenas uma vez ou quando o tamanho mudar
-    if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-    }
-
-    const context = canvas.getContext('2d');
-    if (!context) {
-      rafIdRef.current = requestAnimationFrame(runLoop);
-      return;
-    }
-
-    // Limpar e desenhar o frame atual do vídeo (invertido horizontalmente)
-    context.save();
-    context.scale(-1, 1);
-    context.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
-    context.restore();
-    
-    // Fazer predição em tempo real
+    webcamRef.current.update();
     await predict();
-
-    // Continuar o loop
     rafIdRef.current = requestAnimationFrame(runLoop);
   };
 
-  // Função de predição em tempo real
+  // Função de predição em tempo real - seguindo exatamente a lógica do HTML
   const predict = async () => {
-    if (!model || !canvasRef.current) return;
+    if (!model || !webcamRef.current) {
+      console.warn('Modelo ou webcam não disponível para predição');
+      return;
+    }
 
     try {
-      const prediction = await model.predict(canvasRef.current);
+      // Predição real do modelo Teachable Machine
+      const prediction = await model.predict(webcamRef.current.canvas);
       
       if (!prediction || prediction.length === 0) {
+        console.warn('Nenhuma predição retornada');
         return;
       }
 
       // Encontrar a classe com maior probabilidade
-      let bestPrediction = prediction[0];
+      let best = prediction[0];
       for (let i = 1; i < prediction.length; i++) {
-        if (prediction[i].probability > bestPrediction.probability) {
-          bestPrediction = prediction[i];
+        if (prediction[i].probability > best.probability) {
+          best = prediction[i];
         }
       }
 
-      const className = bestPrediction.className;
-      const confidence = Math.round(bestPrediction.probability * 100);
+      const className = best.className;
+      const confidence = Math.round(best.probability * 100);
 
-      console.log('Classe detectada:', className, 'Confiança:', confidence + '%');
+      // Logs para debug - você pode ver no console do navegador
+      console.log('=== PREDIÇÃO REAL DO MODELO ===');
+      console.log('Classe detectada:', className);
+      console.log('Confiança:', confidence + '%');
       console.log('Todas as predições:', prediction.map(p => `${p.className}: ${(p.probability * 100).toFixed(1)}%`));
+      console.log('==============================');
 
       // Threshold de confiança mínimo reduzido para 50%
       const MIN_CONFIDENCE_THRESHOLD = 50;
       
-      // Se a confiança for muito baixa OU for Default (vazio), usar Default
+      // Se a confiança for muito baixa OU for Defaut, usar Defaut
       let finalClassName = className;
-      if (confidence < MIN_CONFIDENCE_THRESHOLD || className === 'Default (vazio)') {
-        finalClassName = 'Default (vazio)';
+      if (confidence < MIN_CONFIDENCE_THRESHOLD || className === 'Defaut') {
+        finalClassName = 'Defaut';
+        console.warn(`Confiança baixa (${confidence}%) ou classe Defaut. Usando Defaut.`);
       }
 
       // Buscar informações na base de dados
-      const materialInfo = recyclingDatabase[finalClassName] || recyclingDatabase['Default (vazio)'];
+      const materialInfo = recyclingDatabase[finalClassName] || recyclingDatabase['Defaut'];
       
       const analysisResult: AnalysisResult = {
         ...materialInfo,
@@ -504,16 +442,16 @@ export default function Home() {
         {/* Modern Camera Interface */}
         {showCamera && (
           <div className="fixed inset-0 bg-black z-50 flex flex-col">
-            <div className="flex-1 relative">
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="w-full h-full object-cover"
-                style={{ transform: 'scaleX(-1)' }} // Espelha a imagem
+            <div className="flex-1 relative flex items-center justify-center overflow-hidden">
+              <div 
+                ref={webcamContainerRef}
+                className="w-full h-full flex items-center justify-center"
+                style={{ 
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
               />
-              <canvas ref={canvasRef} className="hidden" />
               
               {/* Modern Loading Overlay */}
               {cameraLoading && (
