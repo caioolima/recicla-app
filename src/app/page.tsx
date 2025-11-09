@@ -577,7 +577,7 @@ export default function Home() {
 
               {/* Resultado em tempo real na câmera */}
               {result && (
-                <div className="absolute bottom-24 md:bottom-36 left-3 md:left-1/2 right-3 md:right-auto md:transform md:-translate-x-1/2 z-10 w-auto max-w-md md:mx-auto">
+                <div className="absolute bottom-20 md:bottom-36 left-3 md:left-1/2 right-3 md:right-auto md:transform md:-translate-x-1/2 z-30 w-full max-w-md md:w-auto md:mx-auto">
                   <div className={`glass-card p-3 md:p-4 rounded-2xl shadow-modern border ${
                     result.isRecyclable 
                       ? 'border-gray-400/30' 
