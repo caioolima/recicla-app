@@ -1,4 +1,4 @@
-# ReciclaApp
+# Recicla App 
 
 Um aplicativo Next.js para análise de materiais recicláveis através de câmera do celular, com foco em sustentabilidade e descarte correto.
 
