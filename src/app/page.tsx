@@ -254,28 +254,40 @@ export default function Home() {
 
   // Loop de predição em tempo real
   const runLoop = async () => {
-    if (!videoRef.current || !model) {
+    if (!videoRef.current || !model || !canvasRef.current) {
+      rafIdRef.current = requestAnimationFrame(runLoop);
       return;
     }
 
-    // Atualizar o canvas com o frame atual do vídeo
-    if (canvasRef.current && videoRef.current) {
-      const canvas = canvasRef.current;
-      const video = videoRef.current;
-      const context = canvas.getContext('2d');
-      
-      if (context && video.videoWidth > 0 && video.videoHeight > 0) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        
-        // Desenha o vídeo no canvas (invertido horizontalmente)
-        context.scale(-1, 1);
-        context.drawImage(video, -canvas.width, 0);
-        
-        // Fazer predição em tempo real
-        await predict();
-      }
+    const canvas = canvasRef.current;
+    const video = videoRef.current;
+    
+    // Verificar se o vídeo está pronto
+    if (video.videoWidth === 0 || video.videoHeight === 0) {
+      rafIdRef.current = requestAnimationFrame(runLoop);
+      return;
     }
+
+    // Configurar canvas apenas uma vez ou quando o tamanho mudar
+    if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+    }
+
+    const context = canvas.getContext('2d');
+    if (!context) {
+      rafIdRef.current = requestAnimationFrame(runLoop);
+      return;
+    }
+
+    // Limpar e desenhar o frame atual do vídeo (invertido horizontalmente)
+    context.save();
+    context.scale(-1, 1);
+    context.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+    context.restore();
+    
+    // Fazer predição em tempo real
+    await predict();
 
     // Continuar o loop
     rafIdRef.current = requestAnimationFrame(runLoop);
@@ -303,10 +315,13 @@ export default function Home() {
       const className = bestPrediction.className;
       const confidence = Math.round(bestPrediction.probability * 100);
 
-      // Threshold de confiança mínimo (70% para ser considerado válido)
-      const MIN_CONFIDENCE_THRESHOLD = 70;
+      console.log('Classe detectada:', className, 'Confiança:', confidence + '%');
+      console.log('Todas as predições:', prediction.map(p => `${p.className}: ${(p.probability * 100).toFixed(1)}%`));
+
+      // Threshold de confiança mínimo reduzido para 50%
+      const MIN_CONFIDENCE_THRESHOLD = 50;
       
-      // Se a confiança for muito baixa, usar Default
+      // Se a confiança for muito baixa OU for Default (vazio), usar Default
       let finalClassName = className;
       if (confidence < MIN_CONFIDENCE_THRESHOLD || className === 'Default (vazio)') {
         finalClassName = 'Default (vazio)';
@@ -552,7 +567,7 @@ export default function Home() {
 
               {/* Resultado em tempo real na câmera */}
               {result && (
-                <div className="absolute bottom-24 left-6 right-6">
+                <div className="absolute bottom-28 md:bottom-24 left-6 right-6 z-10">
                   <div className={`glass-card p-4 rounded-2xl shadow-modern border ${
                     result.isRecyclable 
                       ? 'border-gray-400/30' 
@@ -562,31 +577,32 @@ export default function Home() {
                       <div className={`w-3 h-3 rounded-full ${
                         result.isRecyclable ? 'bg-white' : 'bg-gray-400'
                       }`}></div>
-                      <h3 className="text-lg font-bold text-white">{result.category}</h3>
+                      <h3 className="text-base md:text-lg font-bold text-white">{result.category}</h3>
                       <div className={`ml-auto glass-card px-2 py-1 rounded-full ${
-                        result.confidence < 70 ? 'bg-red-500/20 border border-red-500/30' : ''
+                        result.confidence < 50 ? 'bg-red-500/20 border border-red-500/30' : ''
                       }`}>
                         <span className={`text-xs font-medium ${
-                          result.confidence < 70 ? 'text-red-300' : 'text-white'
+                          result.confidence < 50 ? 'text-red-300' : 'text-white'
                         }`}>
                           {result.confidence}%
                         </span>
                       </div>
                     </div>
-                    <p className="text-white font-semibold">{result.material}</p>
+                    <p className="text-white text-sm md:text-base font-semibold">{result.material}</p>
                   </div>
                 </div>
               )}
             </div>
             
             {/* Camera Controls */}
-            <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2">
+            <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-20">
               <button
                 onClick={stopCamera}
-                className="px-8 py-4 bg-gray-800 text-white rounded-xl hover:bg-gray-700 transition-colors flex items-center space-x-3 font-medium text-lg cursor-pointer"
+                className="px-6 md:px-8 py-3 md:py-4 bg-gray-800 text-white rounded-xl hover:bg-gray-700 transition-colors flex items-center space-x-2 md:space-x-3 font-medium text-base md:text-lg cursor-pointer"
               >
-                <span className="text-xl">✕</span>
-                <span>Fechar Câmera</span>
+                <span className="text-lg md:text-xl">✕</span>
+                <span className="hidden sm:inline">Fechar Câmera</span>
+                <span className="sm:hidden">Fechar</span>
               </button>
             </div>
           </div>
