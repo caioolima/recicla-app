@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Camera, Upload, Recycle, MapPin, Zap, ZapOff } from 'lucide-react';
-import Image from 'next/image';
+import { Camera, Recycle, MapPin, Zap, ZapOff } from 'lucide-react';
 import DisposalLocations from '@/components/DisposalLocations';
 import * as tmImage from '@teachablemachine/image';
 
@@ -78,18 +77,16 @@ const recyclingDatabase: Record<string, AnalysisResult> = {
 };
 
 export default function Home() {
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
-  const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [showDisposalLocations, setShowDisposalLocations] = useState(false);
   const [cameraLoading, setCameraLoading] = useState(false);
   const [model, setModel] = useState<tmImage.CustomMobileNet | null>(null);
   const [modelLoading, setModelLoading] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const rafIdRef = useRef<number | null>(null);
   const [showCamera, setShowCamera] = useState(false);
   const [flashOn, setFlashOn] = useState(false);
 
@@ -177,11 +174,16 @@ export default function Home() {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         
-        // Aguardar o video carregar
+        // Aguardar o video carregar e iniciar o loop de predição
         videoRef.current.onloadedmetadata = () => {
           console.log('Metadata carregada, iniciando reprodução...');
           setCameraLoading(false);
           videoRef.current?.play().catch(e => console.error('Erro ao reproduzir:', e));
+          
+          // Iniciar o loop de predição em tempo real quando o modelo estiver pronto
+          if (model) {
+            runLoop();
+          }
         };
         
         // Fallback caso onloadedmetadata não funcione
@@ -189,6 +191,11 @@ export default function Home() {
           if (videoRef.current) {
             setCameraLoading(false);
             videoRef.current.play().catch(e => console.error('Erro no fallback:', e));
+            
+            // Iniciar o loop de predição em tempo real quando o modelo estiver pronto
+            if (model) {
+              runLoop();
+            }
           }
         }, 1000);
       }
@@ -202,6 +209,12 @@ export default function Home() {
   };
 
   const stopCamera = () => {
+    // Cancelar o loop de predição
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    
     if (videoRef.current?.srcObject) {
       const stream = videoRef.current.srcObject as MediaStream;
       stream.getTracks().forEach(track => track.stop());
@@ -213,6 +226,7 @@ export default function Home() {
     setShowCamera(false);
     setCameraLoading(false);
     setFlashOn(false);
+    setResult(null);
   };
 
   const toggleFlash = async () => {
@@ -238,14 +252,19 @@ export default function Home() {
     }
   };
 
-  const capturePhoto = () => {
-    if (videoRef.current && canvasRef.current) {
+  // Loop de predição em tempo real
+  const runLoop = async () => {
+    if (!videoRef.current || !model) {
+      return;
+    }
+
+    // Atualizar o canvas com o frame atual do vídeo
+    if (canvasRef.current && videoRef.current) {
       const canvas = canvasRef.current;
       const video = videoRef.current;
       const context = canvas.getContext('2d');
       
-      if (context) {
-        // Define o tamanho do canvas igual ao vídeo
+      if (context && video.videoWidth > 0 && video.videoHeight > 0) {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         
@@ -253,63 +272,24 @@ export default function Home() {
         context.scale(-1, 1);
         context.drawImage(video, -canvas.width, 0);
         
-        // Converte para imagem
-        const imageData = canvas.toDataURL('image/jpeg', 0.8);
-        setCapturedImage(imageData);
-        stopCamera();
-        analyzeImage(imageData);
+        // Fazer predição em tempo real
+        await predict();
       }
     }
+
+    // Continuar o loop
+    rafIdRef.current = requestAnimationFrame(runLoop);
   };
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const imageData = e.target?.result as string;
-        setCapturedImage(imageData);
-        analyzeImage(imageData);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const analyzeImage = async (imageData: string) => {
-    if (!model) {
-      alert('Modelo ainda não carregado. Aguarde um momento e tente novamente.');
-      return;
-    }
-
-    setIsAnalyzing(true);
+  // Função de predição em tempo real
+  const predict = async () => {
+    if (!model || !canvasRef.current) return;
 
     try {
-      // Criar uma imagem a partir do base64
-      const img = new window.Image();
-      img.crossOrigin = 'anonymous';
-      
-      await new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = reject;
-        img.src = imageData;
-      });
-
-      // Criar um canvas temporário para a predição
-      const tempCanvas = document.createElement('canvas');
-      const tempContext = tempCanvas.getContext('2d');
-      if (!tempContext) {
-        throw new Error('Não foi possível criar contexto do canvas');
-      }
-
-      tempCanvas.width = img.width;
-      tempCanvas.height = img.height;
-      tempContext.drawImage(img, 0, 0);
-
-      // Fazer a predição
-      const prediction = await model.predict(tempCanvas);
+      const prediction = await model.predict(canvasRef.current);
       
       if (!prediction || prediction.length === 0) {
-        throw new Error('Nenhuma predição retornada');
+        return;
       }
 
       // Encontrar a classe com maior probabilidade
@@ -323,9 +303,6 @@ export default function Home() {
       const className = bestPrediction.className;
       const confidence = Math.round(bestPrediction.probability * 100);
 
-      console.log('Classe detectada:', className, 'Confiança:', confidence + '%');
-      console.log('Todas as predições:', prediction.map(p => `${p.className}: ${(p.probability * 100).toFixed(1)}%`));
-
       // Threshold de confiança mínimo (70% para ser considerado válido)
       const MIN_CONFIDENCE_THRESHOLD = 70;
       
@@ -333,7 +310,6 @@ export default function Home() {
       let finalClassName = className;
       if (confidence < MIN_CONFIDENCE_THRESHOLD || className === 'Default (vazio)') {
         finalClassName = 'Default (vazio)';
-        console.warn(`Confiança muito baixa (${confidence}%). Usando classificação padrão.`);
       }
 
       // Buscar informações na base de dados
@@ -345,17 +321,13 @@ export default function Home() {
       };
 
       setResult(analysisResult);
-    } catch (error) {
-      console.error('Erro na análise:', error);
-      alert('Erro ao analisar a imagem. Tente novamente.');
-    } finally {
-      setIsAnalyzing(false);
+    } catch (err) {
+      console.error('Erro na predição:', err);
     }
   };
 
   const resetAnalysis = () => {
     setResult(null);
-    setCapturedImage(null);
   };
 
 
@@ -423,7 +395,7 @@ export default function Home() {
       <main className="relative z-10 px-6 py-8">
 
         {/* Modern Capture Area */}
-        {!capturedImage ? (
+        {!showCamera && (
           <div className="relative group">
             {/* Advanced Glow Effect */}
             <div className="absolute -inset-2 bg-gradient-to-r from-gray-800 via-gray-700 to-gray-600 rounded-3xl blur-lg opacity-20 group-hover:opacity-40 transition-all duration-300"></div>
@@ -437,10 +409,10 @@ export default function Home() {
                 </div>
                 
                 <h2 className="text-4xl font-black text-white mb-4">
-                  Análise Inteligente
+                  Análise Inteligente em Tempo Real
                 </h2>
                 <p className="text-white text-lg font-medium mb-2">Powered by AI Vision Technology</p>
-                <p className="text-white text-sm">Capture ou envie uma foto para análise instantânea com IA</p>
+                <p className="text-white text-sm">A IA reconhece materiais em tempo real através da câmera</p>
               </div>
               
               <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -451,88 +423,52 @@ export default function Home() {
                   <Camera className="h-6 w-6" />
                   <span>Abrir Câmera</span>
                 </button>
-                
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                  className="px-10 py-5 glass-card text-white rounded-xl flex items-center justify-center space-x-4 hover:opacity-80 transition-all duration-200 shadow-md hover:shadow-lg border border-white/20 font-medium cursor-pointer text-lg"
-                >
-                  <Upload className="h-6 w-6" />
-                  <span>Enviar Foto</span>
-                  </button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                  />
               </div>
             </div>
           </div>
-        ) : (
-          <div className="glass-card rounded-3xl shadow-modern overflow-hidden mb-6">
+        )}
+
+        {/* Resultado da análise em tempo real */}
+        {result && !showCamera && (
+          <div className="mt-6 glass-card rounded-3xl shadow-modern overflow-hidden">
             <div className="p-6">
-              <div className="flex justify-center">
-                <Image
-                  src={capturedImage}
-                  alt="Material capturado"
-                  width={600}
-                  height={400}
-                  className="max-w-lg h-80 object-contain rounded-2xl shadow-modern"
-                />
-              </div>
-            </div>
-            
-            {isAnalyzing ? (
-              <div className="p-8 text-center">
-                <div className="relative inline-block mb-6">
-                  <div className="spinner mx-auto mb-4"></div>
-                  <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full blur-lg opacity-30 animate-pulse"></div>
-                </div>
-                <p className="text-white text-lg font-medium">Analisando material com IA...</p>
-                <div className="mt-4 w-full bg-white/10 rounded-full h-2">
-                  <div className="bg-gradient-to-r from-gray-700 to-gray-600 h-2 rounded-full"></div>
-                </div>
-              </div>
-            ) : result ? (
-              <div className="p-6">
-                <div className={`glass-card p-6 rounded-2xl mb-6 border ${
-                  result.isRecyclable 
-                    ? 'border-gray-400/30 shadow-glow-accent' 
-                    : 'border-gray-500/30 shadow-glow-secondary'
-                }`}>
-                  <div className="flex items-center space-x-3 mb-4">
-                    <div className={`w-4 h-4 rounded-full ${
-                      result.isRecyclable ? 'bg-white' : 'bg-gray-400'
-                    }`}></div>
-                    <h3 className="text-xl font-bold text-white">{result.category}</h3>
-                    <div className={`ml-auto glass-card px-3 py-1 rounded-full ${
-                      result.confidence < 70 ? 'bg-red-500/20 border border-red-500/30' : ''
+              <div className={`glass-card p-6 rounded-2xl mb-6 border ${
+                result.isRecyclable 
+                  ? 'border-gray-400/30 shadow-glow-accent' 
+                  : 'border-gray-500/30 shadow-glow-secondary'
+              }`}>
+                <div className="flex items-center space-x-3 mb-4">
+                  <div className={`w-4 h-4 rounded-full ${
+                    result.isRecyclable ? 'bg-white' : 'bg-gray-400'
+                  }`}></div>
+                  <h3 className="text-xl font-bold text-white">{result.category}</h3>
+                  <div className={`ml-auto glass-card px-3 py-1 rounded-full ${
+                    result.confidence < 70 ? 'bg-red-500/20 border border-red-500/30' : ''
+                  }`}>
+                    <span className={`text-sm font-medium ${
+                      result.confidence < 70 ? 'text-red-300' : 'text-white'
                     }`}>
-                      <span className={`text-sm font-medium ${
-                        result.confidence < 70 ? 'text-red-300' : 'text-white'
-                      }`}>
-                        {result.confidence}% confiança
-                        {result.confidence < 70 && ' ⚠️'}
-                      </span>
-                    </div>
+                      {result.confidence}% confiança
+                      {result.confidence < 70 && ' ⚠️'}
+                    </span>
                   </div>
-                  <p className="text-white text-lg font-semibold">{result.material}</p>
-                  {result.confidence < 70 && (
-                    <div className="mt-3 p-3 bg-red-500/10 border border-red-500/30 rounded-xl">
-                      <p className="text-red-300 text-sm">
-                        ⚠️ Confiança baixa. O resultado pode não ser preciso. Tente capturar uma imagem mais clara.
-                      </p>
-                    </div>
-                  )}
                 </div>
-                
-                
-                <div className="space-y-3">
+                <p className="text-white text-lg font-semibold">{result.material}</p>
+                <p className="text-white text-sm mt-2">{result.disposalInfo}</p>
+                {result.confidence < 70 && (
+                  <div className="mt-3 p-3 bg-red-500/10 border border-red-500/30 rounded-xl">
+                    <p className="text-red-300 text-sm">
+                      ⚠️ Confiança baixa. O resultado pode não ser preciso. Tente posicionar o objeto melhor na câmera.
+                    </p>
+                  </div>
+                )}
+              </div>
+              
+              <div className="space-y-3">
                 {userLocation && (
                   <button
                     onClick={() => setShowDisposalLocations(true)}
-                    className="px-6 py-3 bg-gradient-to-r from-gray-800 to-gray-700 text-white rounded-xl flex items-center justify-center space-x-2 hover:opacity-80 transition-all duration-200 shadow-md hover:shadow-lg font-medium cursor-pointer"
+                    className="px-6 py-3 bg-gradient-to-r from-gray-800 to-gray-700 text-white rounded-xl flex items-center justify-center space-x-2 hover:opacity-80 transition-all duration-200 shadow-md hover:shadow-lg font-medium cursor-pointer w-full"
                   >
                     <MapPin className="h-5 w-5" />
                     <span>Encontrar Pontos de Descarte</span>
@@ -541,13 +477,12 @@ export default function Home() {
                 
                 <button
                   onClick={resetAnalysis}
-                    className="px-6 py-3 glass-card text-white rounded-xl hover:opacity-80 transition-all duration-200 shadow-md hover:shadow-lg border border-white/20 font-medium cursor-pointer"
+                  className="px-6 py-3 glass-card text-white rounded-xl hover:opacity-80 transition-all duration-200 shadow-md hover:shadow-lg border border-white/20 font-medium cursor-pointer w-full"
                 >
-                    <span>Analisar Outro Material</span>
+                  <span>Limpar Resultado</span>
                 </button>
-                </div>
               </div>
-            ) : null}
+            </div>
           </div>
         )}
 
@@ -590,8 +525,8 @@ export default function Home() {
                         <Camera className="h-6 w-6 text-white" />
                       </div>
                       <div>
-                        <h3 className="text-lg font-bold text-white">Posicione o material</h3>
-                        <p className="text-white text-sm">Centralize o objeto que deseja analisar</p>
+                        <h3 className="text-lg font-bold text-white">Reconhecimento em Tempo Real</h3>
+                        <p className="text-white text-sm">Posicione o material na frente da câmera</p>
                       </div>
                     </div>
                   </div>
@@ -599,7 +534,7 @@ export default function Home() {
                   {/* Flash Button */}
                   <button
                     onClick={toggleFlash}
-                    className={`p-4 rounded-2xl shadow-modern transition-all duration-200 ${
+                    className={`p-4 rounded-2xl shadow-modern transition-all duration-200 cursor-pointer ${
                       flashOn 
                         ? 'bg-white text-black' 
                         : 'glass-card text-white border border-white/20'
@@ -614,26 +549,45 @@ export default function Home() {
                   </button>
                 </div>
               </div>
+
+              {/* Resultado em tempo real na câmera */}
+              {result && (
+                <div className="absolute bottom-24 left-6 right-6">
+                  <div className={`glass-card p-4 rounded-2xl shadow-modern border ${
+                    result.isRecyclable 
+                      ? 'border-gray-400/30' 
+                      : 'border-gray-500/30'
+                  }`}>
+                    <div className="flex items-center space-x-3 mb-2">
+                      <div className={`w-3 h-3 rounded-full ${
+                        result.isRecyclable ? 'bg-white' : 'bg-gray-400'
+                      }`}></div>
+                      <h3 className="text-lg font-bold text-white">{result.category}</h3>
+                      <div className={`ml-auto glass-card px-2 py-1 rounded-full ${
+                        result.confidence < 70 ? 'bg-red-500/20 border border-red-500/30' : ''
+                      }`}>
+                        <span className={`text-xs font-medium ${
+                          result.confidence < 70 ? 'text-red-300' : 'text-white'
+                        }`}>
+                          {result.confidence}%
+                        </span>
+                      </div>
+                    </div>
+                    <p className="text-white font-semibold">{result.material}</p>
+                  </div>
+                </div>
+              )}
             </div>
             
             {/* Camera Controls */}
             <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2">
-              <div className="flex space-x-6">
-                <button
-                  onClick={stopCamera}
-                  className="px-8 py-4 bg-gray-800 text-white rounded-xl hover:bg-gray-700 transition-colors flex items-center space-x-3 font-medium text-lg"
-                >
-                  <span className="text-xl">✕</span>
-                  <span>Cancelar</span>
-                </button>
-                <button
-                  onClick={capturePhoto}
-                  className="px-10 py-5 bg-white text-black rounded-xl hover:bg-gray-200 transition-colors flex items-center space-x-4 font-bold text-xl shadow-lg"
-                >
-                  <Camera className="h-8 w-8" />
-                  <span>Capturar</span>
-                </button>
-              </div>
+              <button
+                onClick={stopCamera}
+                className="px-8 py-4 bg-gray-800 text-white rounded-xl hover:bg-gray-700 transition-colors flex items-center space-x-3 font-medium text-lg cursor-pointer"
+              >
+                <span className="text-xl">✕</span>
+                <span>Fechar Câmera</span>
+              </button>
             </div>
           </div>
         )}
