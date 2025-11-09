@@ -534,7 +534,7 @@ export default function Home() {
               {/* Camera Instructions Overlay */}
               <div className="absolute top-6 left-6 right-6">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="glass-card p-4 rounded-2xl shadow-modern flex-1">
+                  <div className="glass-card p-4 rounded-2xl shadow-modern max-w-md">
                     <div className="flex items-center space-x-4">
                       <div className="p-3 bg-gradient-to-r from-gray-800 to-gray-700 rounded-xl">
                         <Camera className="h-6 w-6 text-white" />
@@ -546,28 +546,38 @@ export default function Home() {
                     </div>
                   </div>
                   
-                  {/* Flash Button */}
-                  <button
-                    onClick={toggleFlash}
-                    className={`p-4 rounded-2xl shadow-modern transition-all duration-200 cursor-pointer ${
-                      flashOn 
-                        ? 'bg-white text-black' 
-                        : 'glass-card text-white border border-white/20'
-                    }`}
-                    title={flashOn ? 'Desligar flash' : 'Ligar flash'}
-                  >
-                    {flashOn ? (
-                      <Zap className="h-6 w-6" />
-                    ) : (
-                      <ZapOff className="h-6 w-6" />
-                    )}
-                  </button>
+                  {/* Flash Button and Close Button */}
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={toggleFlash}
+                      className={`p-4 rounded-2xl shadow-modern transition-all duration-200 cursor-pointer ${
+                        flashOn 
+                          ? 'bg-white text-black' 
+                          : 'glass-card text-white border border-white/20'
+                      }`}
+                      title={flashOn ? 'Desligar flash' : 'Ligar flash'}
+                    >
+                      {flashOn ? (
+                        <Zap className="h-6 w-6" />
+                      ) : (
+                        <ZapOff className="h-6 w-6" />
+                      )}
+                    </button>
+                    
+                    <button
+                      onClick={stopCamera}
+                      className="p-4 rounded-2xl shadow-modern transition-all duration-200 cursor-pointer glass-card text-white border border-white/20 hover:bg-white/10"
+                      title="Fechar câmera"
+                    >
+                      <span className="text-2xl font-bold">×</span>
+                    </button>
+                  </div>
                 </div>
               </div>
 
               {/* Resultado em tempo real na câmera */}
               {result && (
-                <div className="absolute bottom-28 md:bottom-24 left-6 right-6 z-10">
+                <div className="absolute bottom-40 md:bottom-36 left-1/2 transform -translate-x-1/2 z-10 w-auto max-w-md">
                   <div className={`glass-card p-4 rounded-2xl shadow-modern border ${
                     result.isRecyclable 
                       ? 'border-gray-400/30' 
@@ -592,18 +602,6 @@ export default function Home() {
                   </div>
                 </div>
               )}
-            </div>
-            
-            {/* Camera Controls */}
-            <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-20">
-              <button
-                onClick={stopCamera}
-                className="px-6 md:px-8 py-3 md:py-4 bg-gray-800 text-white rounded-xl hover:bg-gray-700 transition-colors flex items-center space-x-2 md:space-x-3 font-medium text-base md:text-lg cursor-pointer"
-              >
-                <span className="text-lg md:text-xl">✕</span>
-                <span className="hidden sm:inline">Fechar Câmera</span>
-                <span className="sm:hidden">Fechar</span>
-              </button>
             </div>
           </div>
         )}
